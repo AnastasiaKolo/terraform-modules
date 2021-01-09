@@ -31,25 +31,13 @@ data "terraform_remote_state" "db" {
 }
 
 data "template_file" "user_data" {
-  count = var.enable_new_user_data ? 0 : 1
-  
   template = file("${path.module}/user-data.sh")
 
   vars = {
     server_port = var.server_port
     db_address  = data.terraform_remote_state.db.outputs.address
     db_port     = data.terraform_remote_state.db.outputs.port
-    cluster     = var.cluster_name
-  }
-}
-
-data "template_file" "user_data_new" {
-  count = var.enable_new_user_data ? 1 : 0
-  
-  template = file("${path.module}/user-data-new.sh")
-
-  vars = {
-    server_port = var.server_port
+    server_text = var.server_text
   }
 }
 
@@ -87,15 +75,11 @@ resource "aws_security_group" "instance" {
 }
 
 resource "aws_launch_configuration" "example" {
-  image_id        = "ami-0c55b159cbfafe1f0"
+  image_id        = var.ami
   instance_type   = var.instance_type
   security_groups = [aws_security_group.instance.id]
 
-  user_data = (
-    length(data.template_file.user_data[*]) > 0
-      ? data.template_file.user_data[0].rendered
-      : data.template_file.user_data_new[0].rendered
-  )
+  user_data = data.template_file.user_data.rendered
   
   # Required when using a launch configuration with an auto scaling group.
   # https://www.terraform.io/docs/providers/aws/r/launch_configuration.html
@@ -121,7 +105,11 @@ resource "aws_autoscaling_group" "example" {
   }
 
   dynamic "tag" {
-    for_each = var.custom_tags
+    for_each = {
+      for key, value in var.custom_tags:
+      key => upper(value)
+      if key != "Name"
+    }
 
     content {
       key                 = tag.key
